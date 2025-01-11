@@ -71,7 +71,28 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
 }
 
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
-    todo!("实现 rms_norm，计算前做一些必要的检查会帮助你后续调试")
+    // todo!("实现 rms_norm，计算前做一些必要的检查会帮助你后续调试")
+    let len = y.size();
+    assert!(len == x.size());
+
+    let _y = unsafe { y.data_mut() };
+    let _x = x.data();
+    let _w = w.data();
+
+    let x_shape = x.shape();
+    let ndim = x_shape.len();
+    let n = x_shape[ndim - 1];
+    let numel = x_shape.iter().fold(1, |acc, x| acc * x);
+    let batch = numel / n;
+
+    for i in 0..batch {
+        let start = i*n;
+        let x_ij_sq = &_x[start..(start+n)].iter().fold(0.0, |acc, xij| acc + xij.powf(2.0));
+        let denom = (x_ij_sq / (n as f32) + epsilon).sqrt();
+        for j in 0..n {
+            _y[start + j] = _w[j] * _x[start + j] / denom;
+        }
+    }
 }
 
 // y = silu(x) * y
@@ -83,13 +104,55 @@ pub fn swiglu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
     // let _y = unsafe { y.data_mut() };
     // let _x = x.data();
 
-    todo!("实现 silu，这里给了一些前期准备工作的提示，你可以参考")
+    // todo!("实现 silu，这里给了一些前期准备工作的提示，你可以参考");
+    let len = y.size();
+    assert!(len == x.size());
+
+    let _y = unsafe { y.data_mut() };
+    let _x = x.data();
+
+    let sigmoid_x = _x.iter().map(|x| 1.0 / (1.0 + (-x).exp())).collect::<Vec<_>>();
+    for i in 0..len {
+        _y[i] = sigmoid_x[i] * _x[i] * _y[i];
+    }
 }
 
 // C = beta * C + alpha * A @ B^T
 // hint: You don't need to do an explicit transpose of B
 pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
-    todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+    // todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+    let a_shape = a.shape();
+    let b_shape = a.shape();
+    let c_shape = c.shape();
+    let m = c_shape[c_shape.len() - 2];
+    let n = c_shape[c_shape.len() - 1];
+    let k = a_shape[a_shape.len() - 1];
+    assert!(a_shape[a_shape.len() - 2] == m);
+    assert!(b_shape[b_shape.len() - 2] == n);
+    assert!(b_shape[b_shape.len() - 1] == k);
+
+    // no broadcast now
+    let batch = c.size() / m / n;
+    let _c = unsafe { c.data_mut() };
+    let _a = a.data();
+    let _b = b.data();
+
+    for b in 0..batch {
+        let offset_c = b * m * n;
+        let offset_a = b * m * k;
+        let offset_b = b * n * k;
+        for i in 0..m {
+            for j in 0..n {
+                let idx_c = offset_c + i * n + j;
+                _c[idx_c] = beta * _c[idx_c];
+                let mut tmp: f32 = 0.0;
+                for e in 0..k {
+                    tmp += _a[offset_a + i * k + e] * _b[offset_b + j * k + e];
+                }
+                _c[idx_c] = _c[idx_c] + alpha * tmp;
+            }
+        }
+    }
 }
 
 // Dot product of two tensors (treated as vectors)
@@ -206,6 +269,18 @@ fn test_matmul_transb() {
     matmul_transb(&mut c, 1., &a, &b, 1.);
     assert!(c.close_to(
         &Tensor::<f32>::new(vec![15., 34., 35., 81.], &vec![2, 2]),
+        1e-3
+    ));
+}
+
+#[test]
+fn test_matmul_transb_3D() {
+    let mut c = Tensor::<f32>::new(vec![-4., -3., -2., -1., 1., 2., 3., 4.], &vec![2, 2, 2]);
+    let a = Tensor::<f32>::new(vec![1., 2., 3., 4., 5., 6., 1., 2., 3., 4., 5., 6.], &vec![2, 2, 3]);
+    let b = Tensor::<f32>::new(vec![1., 2., 3., 4., 5., 6., 1., 2., 3., 4., 5., 6.], &vec![2, 2, 3]);
+    matmul_transb(&mut c, 1., &a, &b, 1.);
+    assert!(c.close_to(
+        &Tensor::<f32>::new(vec![10., 29., 30., 76., 15., 34., 35., 81.], &vec![2, 2, 2]),
         1e-3
     ));
 }
