@@ -1,3 +1,5 @@
+use std::fmt::format;
+
 use crate::config::LlamaConfigJson;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
@@ -21,36 +23,36 @@ pub struct LLamaParams<T> {
 }
 
 // model.layers.0.input_layernorm.weight
-// model.layers.0.mlp.up_proj.weight
-// model.layers.0.self_attn.v_proj.weight
-// model.layers.1.mlp.down_proj.weight
-// model.layers.0.self_attn.k_proj.weight
-// model.layers.1.mlp.gate_proj.weight
 // model.layers.0.self_attn.q_proj.weight
-// model.layers.0.post_attention_layernorm.weight
-// model.layers.1.post_attention_layernorm.weight
-// model.layers.1.input_layernorm.weight
+// model.layers.0.self_attn.k_proj.weight
+// model.layers.0.self_attn.v_proj.weight
 // model.layers.0.self_attn.o_proj.weight
-// model.layers.1.self_attn.q_proj.weight
-// model.layers.1.self_attn.o_proj.weight
-// model.norm.weight
-// model.layers.1.self_attn.k_proj.weight
-// model.layers.1.self_attn.v_proj.weight
-// lm_head.weight
-// model.layers.1.mlp.up_proj.weight
+
+// model.layers.0.post_attention_layernorm.weight
+
+// model.layers.0.mlp.up_proj.weight
 // model.layers.0.mlp.gate_proj.weight
 // model.layers.0.mlp.down_proj.weight
-// embedding_table
+
+// model.layers.1.input_layernorm.weight
+// model.layers.1.self_attn.q_proj.weight
+// model.layers.1.self_attn.k_proj.weight
+// model.layers.1.self_attn.v_proj.weight
+// model.layers.1.self_attn.o_proj.weight
+
+// model.layers.1.post_attention_layernorm.weight
+
+// model.layers.1.mlp.up_proj.weight
+// model.layers.1.mlp.gate_proj.weight
+// model.layers.1.mlp.down_proj.weight
+
+// model.norm.weight
+// lm_head.weight
 
 impl LLamaParams<f32> {
     pub fn from_safetensors(safetensor: &SafeTensors, config: &LlamaConfigJson) -> Self {
         // todo!("实现从safetensors文件的模型参数加载");
         let get_tensor = |name: &str| {
-            let namelist = safetensor.names();
-            for n in namelist {
-                println!("{}", n);
-            }
-            println!("{}", name);
             let tensorname = match name {
                 "lm_head" => "lm_head.weight",
                 "embedding_table" => "lm_head.weight",
@@ -58,7 +60,7 @@ impl LLamaParams<f32> {
                 _ => "",
             };
 
-            let tensorview = safetensor.tensor(tensorname).unwrap();
+            let tensorview = safetensor.tensor(if tensorname != "" {tensorname} else {name}).unwrap();
             let vec_u8 = tensorview.data().to_vec();
             let mut vec_f32 = Vec::<f32>::new();
             for i in 0..(vec_u8.len() / 4) {
@@ -72,22 +74,26 @@ impl LLamaParams<f32> {
         };
         
         let get_tensors = |name: &str| {
-            let mut ret = Vec::<Tensor<f32>>::new();
-            let namelist = safetensor.names();
+            let n_layers = config.num_hidden_layers;
+            let mut tensor_vec = Vec::<Tensor<f32>>::with_capacity(n_layers);
 
             let tensorname = match name {
-                "rms_att_w" => "lm_head.weight",
-                "embedding_table" => "lm_head.weight",
-                "rms_out_w" => "model.norm.weight",
+                "rms_att_w" => "input_layernorm.weight",
+                "wq" => "self_attn.q_proj.weight",
+                "wk" => "self_attn.k_proj.weight",
+                "wv" => "self_attn.v_proj.weight",
+                "wo" => "self_attn.o_proj.weight",
+                "rms_ffn_w" => "post_attention_layernorm.weight",
+                "w_up" => "mlp.up_proj.weight",
+                "w_gate" => "mlp.gate_proj.weight",
+                "w_down" => "mlp.down_proj.weight",
                 _ => "",
             };
 
-            for n in namelist {
-                if n.ends_with(tensorname) {
-                    ret.push(get_tensor(n));
-                }
+            for n in 0..n_layers {
+                tensor_vec.push(get_tensor(&format!("model.layers.{n}.{tensorname}")));
             }
-            return ret;
+            return tensor_vec;
         };
 
         LLamaParams {
